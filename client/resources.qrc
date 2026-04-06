@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <file>resources/qml/ConnectionDialog.qml</file>
+    </qresource>
+</RCC>

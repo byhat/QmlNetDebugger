@@ -1,5 +1,4 @@
-#ifndef MAINWINDOW_H
-#define MAINWINDOW_H
+#pragma once
 
 #include <QMainWindow>
 #include <QQuickWidget>
@@ -189,4 +188,3 @@ private:
     bool m_updateIndicatorVisible;
 };
 
-#endif // MAINWINDOW_H

@@ -455,14 +455,13 @@ void MainWindow::loadQmlContent(const QString &content)
     // Create a persistent file to store the QML content
     // We use a fixed filename instead of a temporary file to avoid deletion issues
     QString filePath = "/tmp/qmlnetdebugger.qml";
-    QFile *qmlFile = new QFile(filePath, this);
-    if (!qmlFile->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        qCritical() << "[" << timestamp << "] MainWindow::loadQmlContent - Failed to create QML file";
+    QFile qmlFile(filePath);
+    if (!qmlFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qCritical() << "Failed to create QML file:" << filePath;
         return;
     }
-    qmlFile->write(content.toUtf8());
-    qmlFile->flush();
-    qmlFile->close();
+    qmlFile.write(content.toUtf8());
+    qmlFile.close();
     
     // DIAGNOSTIC: Verify file content was written
     QFile verifyFile(filePath);
@@ -479,6 +478,11 @@ void MainWindow::loadQmlContent(const QString &content)
     
     // Load the QML content using setSource with the file URL
     // Since we're using Item instead of ApplicationWindow, this will work correctly
+    
+    // Clear the QML engine's component cache to force re-reading from disk.
+    // Without this, Qt returns the cached compiled component since the URL never changes.
+    m_qmlEngine->clearComponentCache();
+    
     m_quickWidget->setSource(fileUrl);
     
     // DIAGNOSTIC: Check root object after loading

@@ -286,7 +286,12 @@ void QmlNetworkLoader::startSseConnection()
             this, [this](QNetworkReply::NetworkError) {
                 onSseError();
             });
-    connect(m_sseReply, &QNetworkReply::finished, this, &QmlNetworkLoader::onSseError);
+    connect(m_sseReply, &QNetworkReply::finished, this, [this]() {
+        // Only handle clean disconnects, not errors (errorOccurred handles those)
+        if (m_sseReply && m_sseReply->error() == QNetworkReply::NoError) {
+            onSseError();
+        }
+    });
     
     qInfo() << "[" << timestamp << "] QmlNetworkLoader::startSseConnection - SSE connection initiated";
 }

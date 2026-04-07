@@ -20,9 +20,10 @@ QmlNetworkLoader::QmlNetworkLoader(QObject *parent)
     , m_pollingTimer(new QTimer(this))
     , m_sseReply(nullptr)
     , m_retryCount(0)
+    , m_sseRetryCount(0)
 {
     // Setup polling timer
-    m_pollingTimer->setSingleShot(false);
+    m_pollingTimer->setSingleShot(true);  // Single-shot: we re-arm manually after each tick
     connect(m_pollingTimer, &QTimer::timeout, this, &QmlNetworkLoader::onPollingTimeout);
 }
 
@@ -40,7 +41,7 @@ bool QmlNetworkLoader::connectToServer(const QUrl &serverUrl, const QString &qml
     if (!serverUrl.isValid()) {
         m_lastError = "Invalid server URL";
         qCritical() << "[" << timestamp << "] Invalid server URL:" << serverUrl.toString();
-        emit errorOccurred(m_lastError);
+        //emit errorOccurred(m_lastError);
         return false;
     }
 
@@ -48,6 +49,7 @@ bool QmlNetworkLoader::connectToServer(const QUrl &serverUrl, const QString &qml
     m_qmlFilename = qmlFilename;
     m_useSSE = useSSE;
     m_retryCount = 0;
+    m_sseRetryCount = 0;
     m_qmlLocalDir = QDir::currentPath() + "/tmp/qml";
 
     setConnectionState(ConnectionState::Connecting);
@@ -83,7 +85,7 @@ void QmlNetworkLoader::refresh()
 {
     if (m_connectionState != ConnectionState::Connected) {
         m_lastError = "Not connected to server";
-        emit errorOccurred(m_lastError);
+        //emit errorOccurred(m_lastError);
         return;
     }
 
@@ -313,6 +315,15 @@ void QmlNetworkLoader::onSseDataReceived()
         return;
     }
 
+    // SSE connection is healthy — reset retry counter
+    m_sseRetryCount = 0;
+
+    // If polling was active (fallback), stop it — SSE is working again
+    if (m_pollingTimer->isActive()) {
+        qInfo() << "SSE data received while polling active — stopping polling, SSE is alive";
+        stopPolling();
+    }
+
     // Append new data to buffer
     m_sseBuffer.append(m_sseReply->readAll());
 
@@ -338,15 +349,31 @@ void QmlNetworkLoader::onSseDataReceived()
 void QmlNetworkLoader::onSseError()
 {
     QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
-    qWarning() << "[" << timestamp << "] QmlNetworkLoader::onSseError - SSE connection error occurred";
+    qWarning() << "[" << timestamp << "] QmlNetworkLoader::onSseError - SSE connection error occurred"
+               << "SSE retry count:" << m_sseRetryCount << "/" << MAX_SSE_RETRIES;
     
     stopSseConnection();
     
-    // Fall back to polling if SSE fails
-    if (m_connectionState == ConnectionState::Connected) {
+    if (m_connectionState != ConnectionState::Connected) {
+        return;
+    }
+
+    if (m_useSSE && m_sseRetryCount < MAX_SSE_RETRIES) {
+        // Reconnect SSE with exponential backoff (1s, 2s, 4s, 8s, ... up to 30s)
+        m_sseRetryCount++;
+        int delayMs = qMin(1000 * (1 << (m_sseRetryCount - 1)), 30000);
+        qWarning() << "[" << timestamp << "] QmlNetworkLoader::onSseError -"
+                   << "Reconnecting SSE in" << delayMs << "ms (attempt" << m_sseRetryCount << ")";
+        QTimer::singleShot(delayMs, this, [this]() {
+            if (m_connectionState == ConnectionState::Connected && !m_sseReply) {
+                startSseConnection();
+            }
+        });
+    } else {
+        // Exhausted SSE retries or SSE not enabled — fall back to polling
         m_lastError = "SSE connection lost, falling back to polling";
-        qWarning() << "[" << timestamp << "] QmlNetworkLoader::onSseError - Falling back to polling";
-        // emit errorOccurred(m_lastError);
+        qWarning() << "[" << timestamp << "] QmlNetworkLoader::onSseError -"
+                   << "SSE retries exhausted, falling back to polling";
         startPolling();
     }
 }
@@ -400,10 +427,12 @@ void QmlNetworkLoader::parseSseEvent(const QString &data)
 void QmlNetworkLoader::startPolling()
 {
     QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
-    qInfo() << "[" << timestamp << "] QmlNetworkLoader::startPolling - Starting polling with interval:" << m_updateInterval << "ms";
+    // Use a longer interval for polling fallback (at least 5 seconds)
+    int pollInterval = qMax(m_updateInterval, 5000);
+    qInfo() << "[" << timestamp << "] QmlNetworkLoader::startPolling - Starting polling with interval:" << pollInterval << "ms";
     
     stopSseConnection();
-    m_pollingTimer->start(m_updateInterval);
+    m_pollingTimer->start(pollInterval);
 }
 
 void QmlNetworkLoader::stopPolling()
@@ -416,10 +445,21 @@ void QmlNetworkLoader::stopPolling()
 
 void QmlNetworkLoader::onPollingTimeout()
 {
-    if (m_connectionState == ConnectionState::Connected) {
-        qInfo() << "Polling timeout, re-downloading bundle";
-        downloadBundle();
+    if (m_connectionState != ConnectionState::Connected) {
+        return;
     }
+
+    // If SSE is preferred and we haven't exhausted retries, try SSE first
+    if (m_useSSE && m_sseRetryCount < MAX_SSE_RETRIES && !m_sseReply) {
+        qInfo() << "Polling timeout: attempting SSE reconnection instead of bundle download";
+        stopPolling();
+        startSseConnection();
+        return;
+    }
+
+    // Otherwise, re-download the bundle as a last resort
+    qInfo() << "Polling timeout: re-downloading bundle";
+    downloadBundle();
 }
 
 void QmlNetworkLoader::onNetworkError(QNetworkReply *reply)
@@ -431,7 +471,7 @@ void QmlNetworkLoader::onNetworkError(QNetworkReply *reply)
     
     m_lastError = QString("Network error: %1").arg(errorString);
     
-    emit errorOccurred(m_lastError);
+    //emit errorOccurred(m_lastError);
     
     // Handle retry logic
     if (m_connectionState == ConnectionState::Connecting && m_retryCount < MAX_RETRIES) {
@@ -472,7 +512,7 @@ void QmlNetworkLoader::handleHttpError(int statusCode, const QString &reason)
     qCritical() << "[" << timestamp << "] QmlNetworkLoader::handleHttpError - HTTP error:" << statusCode << "Reason:" << reason;
     
     setConnectionState(ConnectionState::Error);
-    emit errorOccurred(reason);
+    //emit errorOccurred(reason);
     emit updateCheckCompleted(false);
 }
 
@@ -519,7 +559,7 @@ void QmlNetworkLoader::onBundleDownloadFinished()
     if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
         m_lastError = "Failed to parse bundle JSON: " + parseError.errorString();
         qCritical() << "[" << timestamp << "]" << m_lastError;
-        emit errorOccurred(m_lastError);
+        //emit errorOccurred(m_lastError);
         return;
     }
 
@@ -576,6 +616,10 @@ void QmlNetworkLoader::onBundleDownloadFinished()
         } else {
             startPolling();
         }
+    } else if (m_connectionState == ConnectionState::Connected && m_pollingTimer->isSingleShot()) {
+        // Re-arm the single-shot polling timer for the next cycle
+        int pollInterval = qMax(m_updateInterval, 5000);
+        m_pollingTimer->start(pollInterval);
     }
 
     emit bundleDownloaded(m_qmlLocalDir);

@@ -161,6 +161,9 @@ private:
     int m_retryCount;
     static const int MAX_RETRIES = 3;
 
+    int m_sseRetryCount;
+    static const int MAX_SSE_RETRIES = 10;
+
     QString m_qmlLocalDir;  // "./tmp/qml" - local storage path
     QString m_pendingSingleFilePath; // tracks which file a single-file download is for
 };

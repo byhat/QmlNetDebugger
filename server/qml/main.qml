@@ -99,17 +99,17 @@ Item
         id: choosePageLst
 
         ListElement {
-            imagePath: "./images/home.svg"
+            imagePath: "../images/home.svg"
             btnText:   "Главная\nстраница"
         }
 
         ListElement {
-            imagePath: "./images/setup.svg"
+            imagePath: "../images/setup.svg"
             btnText:   "Настройки"
         }
 
         ListElement {
-            imagePath: "./images/info.svg"
+            imagePath: "../images/info.svg"
             btnText:   "О программе"
         }
     }
@@ -142,13 +142,13 @@ Item
         }
     }
 
-    Connections {
-        target: app
-        function onQmlMessageUpdate(message) {
-            msgDialog.message = message.text
-            msgDialog.open()
-        }
-    }
+    // Connections {
+    //     target: app
+    //     function onQmlMessageUpdate(message) {
+    //         msgDialog.message = message.text
+    //         msgDialog.open()
+    //     }
+    // }
 
     Component.onCompleted: app.start()
 }

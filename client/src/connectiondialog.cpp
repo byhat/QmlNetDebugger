@@ -48,10 +48,10 @@ void ConnectionDialog::setupUi()
     m_portSpinBox->setValue(8080);
     connectionLayout->addRow("Server Port:", m_portSpinBox);
     
-    // QML filename
+    // QML entry point
     m_filenameEdit = new QLineEdit(this);
     m_filenameEdit->setPlaceholderText("e.g., main.qml");
-    connectionLayout->addRow("QML Filename:", m_filenameEdit);
+    connectionLayout->addRow("Entry Point QML:", m_filenameEdit);
     
     mainLayout->addWidget(connectionGroup);
     

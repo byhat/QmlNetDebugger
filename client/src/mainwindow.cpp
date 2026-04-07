@@ -53,6 +53,10 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::onErrorOccurred);
     connect(m_networkLoader, &QmlNetworkLoader::updateCheckCompleted,
             this, &MainWindow::onUpdateCheckCompleted);
+    connect(m_networkLoader, &QmlNetworkLoader::bundleDownloaded,
+            this, &MainWindow::onBundleDownloaded);
+    connect(m_networkLoader, &QmlNetworkLoader::fileUpdated,
+            this, &MainWindow::onFileUpdated);
     
     qInfo() << "[" << timestamp << "] MainWindow::MainWindow - MainWindow initialized, showing connection dialog in 100ms";
     
@@ -84,7 +88,6 @@ void MainWindow::closeEvent(QCloseEvent *event)
 void MainWindow::setupUi()
 {
     setWindowTitle("QmlNetDebugger");
-    setMinimumSize(800, 600);
     
     // Create central widget
     auto *centralWidget = new QWidget(this);
@@ -433,66 +436,102 @@ void MainWindow::onQmlComponentStatusChanged(QQmlComponent::Status status)
 
 void MainWindow::loadQmlContent(const QString &content)
 {
+    Q_UNUSED(content)
+    // Legacy single-file loading — no longer used.
+    // All loading now goes through loadQmlFromFolder().
+}
+
+void MainWindow::loadQmlFromFolder(const QString &qmlDir)
+{
     QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
-    qInfo() << "[" << timestamp << "] MainWindow::loadQmlContent - Loading QML content, size:" << content.size() << "bytes";
-    
-    // DIAGNOSTIC: Check current root object before clearing
-    QQuickItem *oldRootObject = m_quickWidget->rootObject();
-    qInfo() << "[" << timestamp << "] MainWindow::loadQmlContent - Old root object:" << oldRootObject
-            << "Address:" << (quintptr)oldRootObject;
-    
-    // Clear existing content first
+    qInfo() << "[" << timestamp << "] MainWindow::loadQmlFromFolder - qmlDir:" << qmlDir;
+
+    m_qmlDir = qmlDir;
+
+    // Determine entry point (from settings, default "main.qml")
+    QString entryPoint = m_settings->qmlFilename();
+    if (entryPoint.isEmpty()) {
+        entryPoint = "main.qml";
+    }
+
+    QString mainQmlPath = qmlDir + "/" + entryPoint;
+    QUrl fileUrl = QUrl::fromLocalFile(mainQmlPath);
+
+    qInfo() << "[" << timestamp << "] MainWindow::loadQmlFromFolder - Loading:" << fileUrl.toString();
+
+    // Clear existing content
     m_quickWidget->setSource(QUrl());
-    
-    // DIAGNOSTIC: Check root object after clearing
-    QQuickItem *clearedRootObject = m_quickWidget->rootObject();
-    qInfo() << "[" << timestamp << "] MainWindow::loadQmlContent - Root object after clear:" << clearedRootObject
-            << "Address:" << (quintptr)clearedRootObject;
-    
-    // DIAGNOSTIC: Check QML engine component cache
-    qInfo() << "[" << timestamp << "] MainWindow::loadQmlContent - QML engine address:" << m_qmlEngine;
-    
-    // Create a persistent file to store the QML content
-    // We use a fixed filename instead of a temporary file to avoid deletion issues
-    QString filePath = "/tmp/qmlnetdebugger.qml";
-    QFile qmlFile(filePath);
-    if (!qmlFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        qCritical() << "Failed to create QML file:" << filePath;
-        return;
-    }
-    qmlFile.write(content.toUtf8());
-    qmlFile.close();
-    
-    // DIAGNOSTIC: Verify file content was written
-    QFile verifyFile(filePath);
-    if (verifyFile.open(QIODevice::ReadOnly)) {
-        QByteArray fileContent = verifyFile.readAll();
-        qInfo() << "[" << timestamp << "] MainWindow::loadQmlContent - File verification - written:" << content.size()
-                << "bytes, file contains:" << fileContent.size() << "bytes, match:" << (content.toUtf8() == fileContent);
-        verifyFile.close();
-    }
-    
-    // Get the file URL
-    QUrl fileUrl = QUrl::fromLocalFile(filePath);
-    qInfo() << "[" << timestamp << "] MainWindow::loadQmlContent - Created QML file:" << filePath << "URL:" << fileUrl;
-    
-    // Load the QML content using setSource with the file URL
-    // Since we're using Item instead of ApplicationWindow, this will work correctly
-    
-    // Clear the QML engine's component cache to force re-reading from disk.
-    // Without this, Qt returns the cached compiled component since the URL never changes.
+
+    // Add the qml folder as an import path so "import components" works
+    m_qmlEngine->addImportPath(qmlDir);
+
+    // Clear component cache to force recompilation
     m_qmlEngine->clearComponentCache();
-    
+
     m_quickWidget->setSource(fileUrl);
-    
-    // DIAGNOSTIC: Check root object after loading
-    QQuickItem *newRootObject = m_quickWidget->rootObject();
-    qInfo() << "[" << timestamp << "] MainWindow::loadQmlContent - New root object:" << newRootObject
-            << "Address:" << (quintptr)newRootObject
-            << "Same as old:" << (newRootObject == oldRootObject);
-    
-    // DIAGNOSTIC: Check if source changed
-    qInfo() << "[" << timestamp << "] MainWindow::loadQmlContent - Source URL:" << m_quickWidget->source();
+
+    // Check for errors
+    if (m_quickWidget->status() == QQuickWidget::Error) {
+        QStringList errors;
+        for (const QQmlError &err : m_quickWidget->errors()) {
+            qCritical() << "[" << timestamp << "] QML Error:" << err.url().toString()
+                        << ":" << err.line() << "-" << err.description();
+            errors << QString("%1:%2 - %3").arg(err.url().toString()).arg(err.line()).arg(err.description());
+        }
+        showError("QML Error:\n" + errors.join("\n"));
+    }
+}
+
+void MainWindow::onBundleDownloaded(const QString &qmlDir)
+{
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
+    qInfo() << "[" << timestamp << "] MainWindow::onBundleDownloaded - qmlDir:" << qmlDir;
+
+    loadQmlFromFolder(qmlDir);
+
+    m_isLoading = false;
+    m_loadingProgressBar->hide();
+
+    m_updateIndicatorVisible = true;
+    QTimer::singleShot(500, this, [this]() {
+        m_updateIndicatorVisible = false;
+        updateStatusBar();
+    });
+
+    updateStatusBar();
+}
+
+void MainWindow::onFileUpdated(const QString &relativePath)
+{
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
+    qInfo() << "[" << timestamp << "] MainWindow::onFileUpdated - file:" << relativePath;
+
+    // Determine entry point
+    QString entryPoint = m_settings->qmlFilename();
+    if (entryPoint.isEmpty()) {
+        entryPoint = "main.qml";
+    }
+
+    // Clear component cache so QML re-reads changed files from disk
+    m_qmlEngine->clearComponentCache();
+
+    if (relativePath == entryPoint) {
+        // Main file changed — full reload
+        qInfo() << "[" << timestamp << "] Main file updated, reloading";
+        loadQmlFromFolder(m_qmlDir);
+    } else {
+        // Component file changed — reload to pick up changes
+        qInfo() << "[" << timestamp << "] Component updated, reloading";
+        loadQmlFromFolder(m_qmlDir);
+    }
+
+    m_updateIndicatorVisible = true;
+    QTimer::singleShot(500, this, [this]() {
+        m_updateIndicatorVisible = false;
+        updateStatusBar();
+    });
+
+    updateStatusBar();
 }
 
 void MainWindow::clearQmlView()

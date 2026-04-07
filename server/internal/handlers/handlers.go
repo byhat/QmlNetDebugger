@@ -2,14 +2,16 @@ package handlers
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/qmlnetdebugger/server/internal/config"
@@ -47,11 +49,6 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 			if !recursive && path != h.cfg.QMLDir {
 				return filepath.SkipDir
 			}
-			return nil
-		}
-
-		// Check file extension
-		if !h.isAllowedExtension(path) {
 			return nil
 		}
 
@@ -115,12 +112,6 @@ func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check file extension
-	if !h.isAllowedExtension(filePath) {
-		h.respondError(w, http.StatusBadRequest, "File type not allowed")
-		return
-	}
-
 	// Check file size
 	if info.Size() > h.cfg.MaxFileSize {
 		h.respondError(w, http.StatusRequestEntityTooLarge, "File too large")
@@ -137,23 +128,25 @@ func (h *Handler) GetFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Open file
-	file, err := os.Open(filePath)
+	// Read file content
+	content, err := os.ReadFile(filePath)
 	if err != nil {
-		log.Error().Err(err).Str("path", filePath).Msg("Failed to open file")
-		h.respondError(w, http.StatusInternalServerError, "Failed to open file")
+		log.Error().Err(err).Str("path", filePath).Msg("Failed to read file")
+		h.respondError(w, http.StatusInternalServerError, "Failed to read file")
 		return
 	}
-	defer file.Close()
+
+	// Detect content type
+	contentType := detectContentType(filePath, content)
 
 	// Set headers
-	w.Header().Set("Content-Type", "application/x-qml")
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("ETag", etag)
 	w.Header().Set("Last-Modified", info.ModTime().UTC().Format(http.TimeFormat))
 	w.Header().Set("Cache-Control", "no-cache")
 
-	// Copy file content to response
-	_, err = io.Copy(w, file)
+	// Write file content to response
+	_, err = w.Write(content)
 	if err != nil {
 		log.Error().Err(err).Str("path", filePath).Msg("Failed to write file content")
 	}
@@ -190,12 +183,6 @@ func (h *Handler) GetFileInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check file extension
-	if !h.isAllowedExtension(filePath) {
-		h.respondError(w, http.StatusBadRequest, "File type not allowed")
-		return
-	}
-
 	// Generate ETag
 	etag := h.generateETag(filePath, info)
 
@@ -212,6 +199,66 @@ func (h *Handler) GetFileInfo(w http.ResponseWriter, r *http.Request) {
 		Size:         info.Size(),
 		LastModified: info.ModTime(),
 		ETag:         etag,
+	})
+}
+
+// BundleFiles handles GET /api/files/bundle
+func (h *Handler) BundleFiles(w http.ResponseWriter, r *http.Request) {
+	files := make(map[string]string)
+	encodings := make(map[string]string)
+
+	err := filepath.Walk(h.cfg.QMLDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		// Check file size
+		if info.Size() > h.cfg.MaxFileSize {
+			log.Warn().Str("path", path).Msg("Skipping file in bundle: exceeds max file size")
+			return nil
+		}
+
+		// Get relative path
+		relPath, err := filepath.Rel(h.cfg.QMLDir, path)
+		if err != nil {
+			log.Error().Err(err).Str("path", path).Msg("Failed to get relative path")
+			return nil
+		}
+
+		// Read file content
+		data, err := os.ReadFile(path)
+		if err != nil {
+			log.Error().Err(err).Str("path", path).Msg("Failed to read file for bundle")
+			return nil
+		}
+
+		slashPath := filepath.ToSlash(relPath)
+		if isTextFile(path) {
+			files[slashPath] = string(data)
+			encodings[slashPath] = "text"
+		} else {
+			files[slashPath] = base64.StdEncoding.EncodeToString(data)
+			encodings[slashPath] = "base64"
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to walk QML directory for bundle")
+		h.respondError(w, http.StatusInternalServerError, "Failed to create file bundle")
+		return
+	}
+
+	h.respondJSON(w, http.StatusOK, models.FileBundleResponse{
+		Files:     files,
+		Encodings: encodings,
+		Count:     len(files),
+		Timestamp: time.Now().UTC(),
 	})
 }
 
@@ -273,6 +320,40 @@ func (h *Handler) getSafeFilePath(name string) (string, error) {
 	}
 
 	return absFullPath, nil
+}
+
+// textExtensions defines file extensions that should be treated as text files
+var textExtensions = map[string]bool{
+	".qml": true, ".js": true, ".txt": true, ".json": true,
+	".css": true, ".xml": true, ".svg": true, ".html": true,
+	".htm": true, ".py": true, ".md": true, ".yaml": true,
+	".yml": true, ".toml": true, ".ini": true, ".cfg": true,
+	".conf": true, ".sh": true, ".bat": true, ".ts": true,
+	".mjs": true, ".cjs": true, ".qs": true, ".ui": true,
+}
+
+// isTextFile checks if a file should be treated as text based on its extension
+func isTextFile(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return textExtensions[ext]
+}
+
+// detectContentType determines the Content-Type for a file
+func detectContentType(filePath string, data []byte) string {
+	ext := strings.ToLower(filepath.Ext(filePath))
+
+	// Handle QML specifically since it's not in standard MIME databases
+	if ext == ".qml" {
+		return "application/x-qml"
+	}
+
+	// Try standard MIME type database
+	if ct := mime.TypeByExtension(ext); ct != "" {
+		return ct
+	}
+
+	// Fall back to content sniffing (uses first 512 bytes)
+	return http.DetectContentType(data)
 }
 
 // isAllowedExtension checks if the file has an allowed extension

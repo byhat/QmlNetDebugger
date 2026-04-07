@@ -133,11 +133,6 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 		return
 	}
 
-	// Check if file has allowed extension
-	if !w.isAllowedExtension(event.Name) {
-		return
-	}
-
 	// Determine event type
 	var action string
 	switch {

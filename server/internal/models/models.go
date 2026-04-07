@@ -49,3 +49,11 @@ type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message,omitempty"`
 }
+
+// FileBundleResponse is the response for downloading all QML files as a bundle
+type FileBundleResponse struct {
+	Files     map[string]string `json:"files"`     // relative path → file content (text or base64)
+	Encodings map[string]string `json:"encodings"` // relative path → "text" or "base64"
+	Count     int               `json:"count"`
+	Timestamp time.Time         `json:"timestamp"`
+}

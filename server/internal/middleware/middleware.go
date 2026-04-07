@@ -53,6 +53,14 @@ func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	}
 }
 
+// Flush implements http.Flusher so that SSE and other streaming responses
+// can flush data through the logging wrapper.
+func (lrw *loggingResponseWriter) Flush() {
+	if flusher, ok := lrw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 // RecoveryMiddleware recovers from panics
 func RecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +121,14 @@ type gzipResponseWriter struct {
 
 func (gzw *gzipResponseWriter) Write(b []byte) (int, error) {
 	return gzw.writer.Write(b)
+}
+
+// Flush implements http.Flusher so that streaming responses can flush
+// data through the gzip wrapper when needed.
+func (gzw *gzipResponseWriter) Flush() {
+	if flusher, ok := gzw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 // RequestIDMiddleware adds a unique request ID to each request

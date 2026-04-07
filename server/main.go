@@ -79,6 +79,7 @@ func main() {
 	api := router.PathPrefix("/api").Subrouter()
 
 	// File endpoints - more specific routes first
+	api.HandleFunc("/files/bundle", h.BundleFiles).Methods("GET")
 	api.HandleFunc("/files", h.ListFiles).Methods("GET")
 	api.HandleFunc("/file/{name:.*}/info", h.GetFileInfo).Methods("GET")
 	api.HandleFunc("/file/{name:.*}", h.GetFile).Methods("GET")

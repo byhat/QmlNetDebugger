@@ -48,116 +48,40 @@ protected:
     void closeEvent(QCloseEvent *event) override;
 
 private slots:
-    /**
-     * @brief Show connection dialog
-     */
     void showConnectionDialog();
-
-    /**
-     * @brief Disconnect from server
-     */
     void disconnect();
-
-    /**
-     * @brief Refresh QML content
-     */
     void refresh();
-
-    /**
-     * @brief Show about dialog
-     */
     void showAbout();
-
-    /**
-     * @brief Handle QML loaded event
-     * @param content QML content
-     * @param etag ETag of the content
-     */
     void onQmlLoaded(const QString &content, const QString &etag);
-
-    /**
-     * @brief Handle QML unchanged event
-     */
     void onQmlUnchanged();
-
-    /**
-     * @brief Handle connection state changed event
-     * @param state New connection state
-     */
     void onConnectionStateChanged(QmlNetworkLoader::ConnectionState state);
-
-    /**
-     * @brief Handle error occurred event
-     * @param error Error message
-     */
     void onErrorOccurred(const QString &error);
-
-    /**
-     * @brief Handle update check completed event
-     * @param updated True if content was updated
-     */
     void onUpdateCheckCompleted(bool updated);
-
-    /**
-     * @brief Handle QML component status change
-     * @param status Component status
-     */
     void onQmlComponentStatusChanged(QQmlComponent::Status status);
-
-    /**
-     * @brief Update status bar
-     */
     void updateStatusBar();
 
+    /**
+     * @brief Handle bundle downloaded — load QML from local folder
+     * @param qmlDir Local path to the qml folder
+     */
+    void onBundleDownloaded(const QString &qmlDir);
+
+    /**
+     * @brief Handle single file updated via SSE
+     * @param relativePath Relative path of the updated file
+     */
+    void onFileUpdated(const QString &relativePath);
+
 private:
-    /**
-     * @brief Setup UI components
-     */
     void setupUi();
-
-    /**
-     * @brief Setup menu bar
-     */
     void setupMenuBar();
-
-    /**
-     * @brief Setup tool bar
-     */
     void setupToolBar();
-
-    /**
-     * @brief Setup status bar
-     */
     void setupStatusBar();
-
-    /**
-     * @brief Load QML content into the view
-     * @param content QML content
-     */
     void loadQmlContent(const QString &content);
-
-    /**
-     * @brief Clear QML view
-     */
+    void loadQmlFromFolder(const QString &qmlDir);
     void clearQmlView();
-
-    /**
-     * @brief Show error message
-     * @param error Error message
-     */
     void showError(const QString &error);
-
-    /**
-     * @brief Show info message
-     * @param message Info message
-     */
     void showInfo(const QString &message);
-
-    /**
-     * @brief Get connection state string
-     * @param state Connection state
-     * @return State string
-     */
     QString connectionStateToString(QmlNetworkLoader::ConnectionState state) const;
 
     // UI Components
@@ -186,5 +110,6 @@ private:
     // State
     bool m_isLoading;
     bool m_updateIndicatorVisible;
+    QString m_qmlDir;
 };
 

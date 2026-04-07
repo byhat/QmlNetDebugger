@@ -10,6 +10,8 @@
 #include <QDateTime>
 #include <QMap>
 #include <QMutex>
+#include <QFile>
+#include <QDir>
 
 /**
  * @brief Network loader for QML files from remote server
@@ -100,133 +102,67 @@ public:
     QString currentETag() const;
 
 signals:
-    /**
-     * @brief Emitted when connection state changes
-     * @param state New connection state
-     */
     void connectionStateChanged(ConnectionState state);
-
-    /**
-     * @brief Emitted when QML content is loaded or updated
-     * @param content QML content
-     * @param etag ETag of the content
-     */
     void qmlLoaded(const QString &content, const QString &etag);
-
-    /**
-     * @brief Emitted when QML content is unchanged (304 Not Modified)
-     */
     void qmlUnchanged();
-
-    /**
-     * @brief Emitted when an error occurs
-     * @param error Error message
-     */
     void errorOccurred(const QString &error);
-
-    /**
-     * @brief Emitted when update check completes
-     * @param updated True if content was updated
-     */
     void updateCheckCompleted(bool updated);
 
+    /**
+     * @brief Emitted after the full QML bundle is downloaded and written to disk
+     * @param qmlDir Local path to the qml folder (e.g. "./tmp/qml")
+     */
+    void bundleDownloaded(const QString &qmlDir);
+
+    /**
+     * @brief Emitted after a single file is updated via SSE
+     * @param relativePath Relative path of the updated file
+     */
+    void fileUpdated(const QString &relativePath);
+
 private slots:
-    /**
-     * @brief Handle QML file download completion
-     */
     void onQmlDownloadFinished();
-
-    /**
-     * @brief Handle SSE data received
-     */
+    void onBundleDownloadFinished();
+    void onSingleFileDownloadFinished();
     void onSseDataReceived();
-
-    /**
-     * @brief Handle SSE connection error
-     */
     void onSseError();
-
-    /**
-     * @brief Handle polling timer timeout
-     */
     void onPollingTimeout();
-
-    /**
-     * @brief Handle network error
-     * @param reply Network reply that failed
-     */
     void onNetworkError(QNetworkReply *reply);
 
 private:
-    /**
-     * @brief Download QML file from server
-     * @param useETag Whether to use ETag for conditional request
-     */
     void downloadQmlFile(bool useETag = true);
-
-    /**
-     * @brief Start SSE connection
-     */
+    void downloadBundle();
+    void downloadSingleFile(const QString &relativePath);
     void startSseConnection();
-
-    /**
-     * @brief Stop SSE connection
-     */
     void stopSseConnection();
-
-    /**
-     * @brief Start polling
-     */
     void startPolling();
-
-    /**
-     * @brief Stop polling
-     */
     void stopPolling();
-
-    /**
-     * @brief Parse SSE event
-     * @param data SSE event data
-     */
     void parseSseEvent(const QString &data);
-
-    /**
-     * @brief Set connection state
-     * @param state New connection state
-     */
     void setConnectionState(ConnectionState state);
-
-    /**
-     * @brief Handle HTTP error response
-     * @param statusCode HTTP status code
-     * @param reason Error reason
-     */
     void handleHttpError(int statusCode, const QString &reason);
+    bool ensureDirectoryExists(const QString &filePath);
 
-    // Network manager
     QNetworkAccessManager *m_networkManager;
-
-    // Connection parameters
     QUrl m_serverUrl;
     QString m_qmlFilename;
     bool m_useSSE;
 
-    // Current state
     ConnectionState m_connectionState;
     QString m_qmlContent;
     QString m_currentETag;
     QDateTime m_lastUpdateTime;
     QString m_lastError;
 
-    // Update mechanism
     QTimer *m_pollingTimer;
     int m_updateInterval;
     QNetworkReply *m_sseReply;
     QByteArray m_sseBuffer;
 
-    // Retry logic
     int m_retryCount;
     static const int MAX_RETRIES = 3;
+
+    QString m_qmlLocalDir;  // "./tmp/qml" - local storage path
+    QString m_pendingSingleFilePath; // tracks which file a single-file download is for
 };
 
 #endif // QMLNETWORKLOADER_H

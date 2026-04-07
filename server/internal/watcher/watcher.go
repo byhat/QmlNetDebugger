@@ -143,9 +143,47 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 	case event.Op&fsnotify.Remove == fsnotify.Remove:
 		action = "deleted"
 	case event.Op&fsnotify.Rename == fsnotify.Rename:
-		action = "deleted" // Treat rename as delete for simplicity
+		action = "deleted" // Treat rename source as delete
 	default:
 		return
+	}
+
+	// For Create events, distinguish between files and directories
+	if action == "created" {
+		info, err := os.Stat(event.Name)
+		if err != nil {
+			// Path disappeared before we could stat it; skip
+			return
+		}
+		if info.IsDir() {
+			// New directory: add to watcher so files inside it are tracked
+			if err := w.watcher.Add(event.Name); err != nil {
+				log.Warn().Err(err).Str("path", event.Name).Msg("Failed to watch new directory")
+			} else {
+				log.Debug().Str("path", event.Name).Msg("Now watching new directory")
+			}
+			return // Don't send SSE event for directory creation
+		}
+		// It's a file — only notify if the extension is allowed
+		if !w.isAllowedExtension(event.Name) {
+			return
+		}
+	}
+
+	// For Write events, only notify for allowed file types
+	if action == "modified" {
+		if !w.isAllowedExtension(event.Name) {
+			return
+		}
+	}
+
+	// For Delete/Rename events the path is already gone, so we can't stat it.
+	// Use extension check as a heuristic to filter out directory removals
+	// and non-interesting files.
+	if action == "deleted" {
+		if !w.isAllowedExtension(event.Name) {
+			return
+		}
 	}
 
 	// Debounce events

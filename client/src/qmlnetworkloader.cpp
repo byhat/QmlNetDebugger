@@ -414,8 +414,29 @@ void QmlNetworkLoader::parseSseEvent(const QString &data)
                 downloadSingleFile(path);
             } else if (action == "deleted") {
                 QString localPath = m_qmlLocalDir + "/" + path;
-                QFile::remove(localPath);
-                qInfo() << "[" << timestamp << "] Deleted local file:" << localPath;
+                if (QFile::remove(localPath)) {
+                    qInfo() << "[" << timestamp << "] Deleted local file:" << localPath;
+                } else {
+                    qWarning() << "[" << timestamp << "] Failed to delete local file:" << localPath;
+                }
+                // Clean up empty parent directories up to m_qmlLocalDir
+                QDir dir(m_qmlLocalDir);
+                QString parentDir = QFileInfo(localPath).absolutePath();
+                while (parentDir != m_qmlLocalDir && dir.exists(parentDir)) {
+                    QDir pd(parentDir);
+                    if (pd.isEmpty()) {
+                        QString removePath = parentDir;
+                        parentDir = QFileInfo(parentDir).absolutePath();
+                        if (parentDir.startsWith(m_qmlLocalDir)) {
+                            pd.removeRecursively();
+                            qInfo() << "[" << timestamp << "] Removed empty directory:" << removePath;
+                        } else {
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
                 emit fileUpdated(path);
             }
         } else {

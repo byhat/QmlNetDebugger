@@ -18,6 +18,6 @@ Item
     visible: true
 
     Text {
-        text: "Test"
+        text: "Test test"
     }
 }

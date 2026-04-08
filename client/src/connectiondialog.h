@@ -1,7 +1,7 @@
 #ifndef CONNECTIONDIALOG_H
 #define CONNECTIONDIALOG_H
 
-#include <QDialog>
+#include <QWidget>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QComboBox>
@@ -9,6 +9,7 @@
 #include <QCheckBox>
 #include <QSpinBox>
 #include <QGroupBox>
+#include <QFrame>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QFormLayout>
@@ -18,20 +19,22 @@
 #include "settings.h"
 
 /**
- * @brief Startup dialog for configuring server connection
+ * @brief Inline connection dialog overlay for configuring server connection
  * 
  * Provides UI for entering server IP, port, and QML filename.
+ * Displayed as an overlay within the main window instead of a separate window,
+ * which is required for proper behavior on Android.
  * Also manages connection history and saves settings.
  */
-class ConnectionDialog : public QDialog
+class ConnectionDialog : public QWidget
 {
     Q_OBJECT
 
 public:
     /**
      * @brief Constructor
-     * @param parent Parent widget
      * @param settings Application settings
+     * @param parent Parent widget (should be the main window's central widget)
      */
     explicit ConnectionDialog(Settings *settings, QWidget *parent = nullptr);
 
@@ -64,55 +67,49 @@ public:
      */
     bool useSSE() const;
 
+    /**
+     * @brief Show the dialog overlay
+     * 
+     * Resizes to fill the parent, reloads settings, and makes visible.
+     */
+    void showDialog();
+
+    /**
+     * @brief Hide the dialog overlay
+     */
+    void hideDialog();
+
+signals:
+    /**
+     * @brief Emitted when the user clicks Connect and input is valid
+     */
+    void accepted();
+
+    /**
+     * @brief Emitted when the user clicks Cancel or presses Escape
+     */
+    void rejected();
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
+
 private slots:
-    /**
-     * @brief Handle connect button click
-     */
     void onConnectClicked();
-
-    /**
-     * @brief Handle cancel button click
-     */
     void onCancelClicked();
-
-    /**
-     * @brief Handle recent connection selection
-     */
     void onRecentConnectionSelected(int index);
-
-    /**
-     * @brief Validate input fields
-     * @return True if input is valid
-     */
     bool validateInput();
 
 private:
-    /**
-     * @brief Setup UI components
-     */
     void setupUi();
-
-    /**
-     * @brief Setup connections
-     */
     void setupConnections();
-
-    /**
-     * @brief Load settings into UI
-     */
     void loadSettings();
-
-    /**
-     * @brief Save settings from UI
-     */
     void saveSettings();
-
-    /**
-     * @brief Load recent connections into combo box
-     */
     void loadRecentConnections();
 
     // UI Components
+    QFrame *m_panel;
     QLineEdit *m_hostEdit;
     QSpinBox *m_portSpinBox;
     QLineEdit *m_filenameEdit;

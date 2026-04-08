@@ -10,12 +10,15 @@
 #include <QFileInfo>
 #include <QQuickWindow>
 #include <QQuickItem>
+#include <QResizeEvent>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
+    , m_centralWidget(nullptr)
     , m_quickWidget(nullptr)
     , m_qmlEngine(nullptr)
     , m_qmlComponent(nullptr)
+    , m_connectionDialog(nullptr)
     , m_isLoading(false)
     , m_updateIndicatorVisible(false)
 {
@@ -85,20 +88,30 @@ void MainWindow::closeEvent(QCloseEvent *event)
     QMainWindow::closeEvent(event);
 }
 
+void MainWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+    
+    // Keep the inline connection dialog overlay sized to the central widget
+    if (m_connectionDialog && m_connectionDialog->isVisible()) {
+        m_connectionDialog->setGeometry(m_centralWidget->rect());
+    }
+}
+
 void MainWindow::setupUi()
 {
     setWindowTitle("QmlNetDebugger");
     
     // Create central widget
-    auto *centralWidget = new QWidget(this);
-    auto *mainLayout = new QVBoxLayout(centralWidget);
+    m_centralWidget = new QWidget(this);
+    auto *mainLayout = new QVBoxLayout(m_centralWidget);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     
     // Create QML engine
     m_qmlEngine = new QQmlEngine(this);
     
     // Create quick widget for QML rendering
-    m_quickWidget = new QQuickWidget(m_qmlEngine, this);
+    m_quickWidget = new QQuickWidget(m_qmlEngine, m_centralWidget);
     m_quickWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
     m_quickWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     
@@ -122,7 +135,14 @@ void MainWindow::setupUi()
     
     mainLayout->addWidget(m_quickWidget);
     
-    setCentralWidget(centralWidget);
+    // Create inline connection dialog overlay (child of central widget)
+    m_connectionDialog = new ConnectionDialog(m_settings, m_centralWidget);
+    connect(m_connectionDialog, &ConnectionDialog::accepted,
+            this, &MainWindow::onConnectionDialogAccepted);
+    connect(m_connectionDialog, &ConnectionDialog::rejected,
+            this, &MainWindow::onConnectionDialogRejected);
+    
+    setCentralWidget(m_centralWidget);
 }
 
 void MainWindow::setupMenuBar()
@@ -221,34 +241,40 @@ void MainWindow::setupStatusBar()
 void MainWindow::showConnectionDialog()
 {
     QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
-    qInfo() << "[" << timestamp << "] MainWindow::showConnectionDialog - Showing connection dialog";
+    qInfo() << "[" << timestamp << "] MainWindow::showConnectionDialog - Showing inline connection dialog";
     
-    ConnectionDialog dialog(m_settings, this);
+    m_connectionDialog->showDialog();
+}
+
+void MainWindow::onConnectionDialogAccepted()
+{
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
     
-    if (dialog.exec() == QDialog::Accepted) {
-        // Connect to server
-        QUrl serverUrl = dialog.serverUrl();
-        QString qmlFilename = dialog.qmlFilename();
-        bool useSSE = dialog.useSSE();
-        
-        QString connectTimestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
-        qInfo() << "[" << connectTimestamp << "] MainWindow::showConnectionDialog - Connection accepted - URL:" << serverUrl.toString()
-                << "QML file:" << qmlFilename << "Use SSE:" << useSSE;
-        
-        // Update network loader settings
-        m_networkLoader->setUpdateInterval(dialog.updateInterval());
-        
-        // Connect
-        if (m_networkLoader->connectToServer(serverUrl, qmlFilename, useSSE)) {
-            m_isLoading = true;
-            m_loadingProgressBar->show();
-            updateStatusBar();
-        } else {
-            qCritical() << "[" << connectTimestamp << "] MainWindow::showConnectionDialog - Failed to initiate connection";
-        }
+    // Connect to server using the dialog's current values
+    QUrl serverUrl = m_connectionDialog->serverUrl();
+    QString qmlFilename = m_connectionDialog->qmlFilename();
+    bool useSSE = m_connectionDialog->useSSE();
+    
+    qInfo() << "[" << timestamp << "] MainWindow::onConnectionDialogAccepted - Connection accepted - URL:" << serverUrl.toString()
+            << "QML file:" << qmlFilename << "Use SSE:" << useSSE;
+    
+    // Update network loader settings
+    m_networkLoader->setUpdateInterval(m_connectionDialog->updateInterval());
+    
+    // Connect
+    if (m_networkLoader->connectToServer(serverUrl, qmlFilename, useSSE)) {
+        m_isLoading = true;
+        m_loadingProgressBar->show();
+        updateStatusBar();
     } else {
-        qInfo() << "[" << timestamp << "] MainWindow::showConnectionDialog - Connection dialog cancelled";
+        qCritical() << "[" << timestamp << "] MainWindow::onConnectionDialogAccepted - Failed to initiate connection";
     }
+}
+
+void MainWindow::onConnectionDialogRejected()
+{
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
+    qInfo() << "[" << timestamp << "] MainWindow::onConnectionDialogRejected - Connection dialog cancelled";
 }
 
 void MainWindow::disconnect()

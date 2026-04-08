@@ -20,7 +20,7 @@
 
 /**
  * @brief Main application window
- * 
+ *
  * Hosts the QML view and manages the application lifecycle.
  * Handles menu actions, status bar updates, and error display.
  */
@@ -47,11 +47,19 @@ protected:
      */
     void closeEvent(QCloseEvent *event) override;
 
+    /**
+     * @brief Handle resize event to resize inline dialog overlay
+     * @param event Resize event
+     */
+    void resizeEvent(QResizeEvent *event) override;
+
 private slots:
     void showConnectionDialog();
     void disconnect();
     void refresh();
     void showAbout();
+    void onConnectionDialogAccepted();
+    void onConnectionDialogRejected();
     void onQmlLoaded(const QString &content, const QString &etag);
     void onQmlUnchanged();
     void onConnectionStateChanged(QmlNetworkLoader::ConnectionState state);
@@ -85,9 +93,11 @@ private:
     QString connectionStateToString(QmlNetworkLoader::ConnectionState state) const;
 
     // UI Components
+    QWidget *m_centralWidget;
     QQuickWidget *m_quickWidget;
     QQmlEngine *m_qmlEngine;
     QQmlComponent *m_qmlComponent;
+    ConnectionDialog *m_connectionDialog;
     
     // Status bar components
     QLabel *m_connectionStatusLabel;
